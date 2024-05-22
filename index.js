@@ -2,11 +2,14 @@ const CHECK_TYPE_REQUEST_URL = "request_url";
 const STATUS_SUCCEEDED = "succeeded";
 const STATUS_FAILED    = "failed";
 
+let timeWindowInSecs = 60*60*24*5;
 let currentTimestampInSecs;
 
 async function main() {
     currentTimestampInSecs = Math.ceil(Date.now()/1000);
-    const res   = await fetch(`/checks?start=0&end=${currentTimestampInSecs}`);
+    const res   = await fetch(
+        `/checks?start=${currentTimestampInSecs - timeWindowInSecs}` +
+        `&end=${currentTimestampInSecs}`);
     const items = await res.json();
 
     const aggregates = {};
@@ -34,7 +37,13 @@ async function main() {
         }
     }
 
-    const mainEl = document.getElementsByTagName("main")[0];
+    renderAggregateChecks(aggregates);
+    window.addEventListener("resize", () => renderAggregateChecks(aggregates));
+}
+
+function renderAggregateChecks(aggregates) {
+    const checksEl = document.getElementById("checks");
+    checksEl.innerHTML = "";
     for (const [id, aggregate] of Object.entries(aggregates)) {
         const el = document.createElement("div");
         el.appendChild(document.createTextNode(id));
@@ -44,14 +53,14 @@ async function main() {
         el.appendChild(document.createElement("br"));
 
         const canvasEl = document.createElement("canvas");
-        canvasEl.style.width  = `${mainEl.clientWidth}px`;
+        canvasEl.style.width  = `${checksEl.clientWidth}px`;
         canvasEl.style.height = "64px";
         el.appendChild(canvasEl);
 
         el.appendChild(document.createElement("br"));
         el.appendChild(document.createElement("br"));
 
-        mainEl.appendChild(el);
+        checksEl.appendChild(el);
 
         renderTimeSeriesCanvas(aggregate, canvasEl);
     }
@@ -63,9 +72,6 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
 
     let tMin = ts[0];
     let tMax = currentTimestampInSecs;
-    let tMinMaxDiff = tMax - tMin;
-    tMin -= 0.1*tMinMaxDiff;
-    tMax += 0.1*tMinMaxDiff;
     const pxPerSec = canvasEl.width/(tMax - tMin);
     const maxY = Math.max(...ys);
 
