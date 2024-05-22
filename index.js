@@ -75,6 +75,62 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
     ctx.fillStyle = "#222";
     ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
 
+    // Draw day, 6 hour and 1 hour rules
+    let day = new Date();
+    day.setTime(tMax*1000);
+    day.setDate(day.getDate() + 1);
+    day.setHours(0);
+    day.setMinutes(0);
+    day.setSeconds(0);
+    day.setMilliseconds(0);
+    while (day.getTime()/1000 > tMin) {
+        const x = (day.getTime()/1000 - tMin)*pxPerSec;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#000";
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvasEl.height);
+        ctx.stroke();
+        day = new Date(day);
+        day.setDate(day.getDate() - 1);
+    }
+    let hour = new Date();
+    hour.setTime(tMax*1000);
+    hour.setHours(hour.getHours() + (6 - hour.getHours()%6));
+    hour.setMinutes(0);
+    hour.setSeconds(0);
+    hour.setMilliseconds(0);
+    while (hour.getTime()/1000 > tMin) {
+        const x = (hour.getTime()/1000 - tMin)*pxPerSec;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "#000";
+        ctx.setLineDash([6, 2]);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvasEl.height);
+        ctx.stroke();
+        hour = new Date(hour);
+        hour.setHours(hour.getHours() - 6);
+    }
+    hour = new Date();
+    hour.setTime(tMax*1000);
+    hour.setHours(hour.getHours() + 1);
+    hour.setMinutes(0);
+    hour.setSeconds(0);
+    hour.setMilliseconds(0);
+    while (hour.getTime()/1000 > tMin) {
+        const x = (hour.getTime()/1000 - tMin)*pxPerSec;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#000";
+        ctx.setLineDash([2, 7]);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvasEl.height);
+        ctx.stroke();
+        hour = new Date(hour);
+        hour.setHours(hour.getHours() - 1);
+    }
+
     // Draw "pins" for timeseries values
     for (let i = 0; i < ts.length; ++i) {
         const t = ts[i];
@@ -90,6 +146,7 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
 
         ctx.lineWidth = 2;
         ctx.strokeStyle = pinColor;
+        ctx.setLineDash([]);
         ctx.beginPath();
         ctx.moveTo(pinX, pinBottom);
         ctx.lineTo(pinX, pinTop);
