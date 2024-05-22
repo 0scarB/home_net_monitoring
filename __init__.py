@@ -25,8 +25,8 @@ checks_n                     = 0
 current_check                = 0
 monitoring_page_ip           = "127.0.0.1"
 monitoring_page_port         = 8000
-schedule_poll_interval       = 5;
-schedule_run_checks_interval = 30;
+schedule_poll_interval       = 60*5;
+schedule_run_checks_interval = 60*30;
 
 
 def dev():
@@ -37,6 +37,26 @@ def dev():
 def command(command_):
     global _command
     _command = command_
+
+
+def ip(monitoring_page_ip_):
+    global monitoring_page_ip
+    monitoring_page_ip = monitoring_page_ip_
+
+
+def port(monitoring_page_port_):
+    global monitoring_page_port
+    monitoring_page_port = monitoring_page_port_
+
+
+def poll_interval(interval):
+    global schedule_poll_interval
+    schedule_poll_interval = interval
+
+
+def run_checks_interval(interval):
+    global schedule_run_checks_interval
+    schedule_run_checks_interval = interval
 
 
 def run_monitor(func):
