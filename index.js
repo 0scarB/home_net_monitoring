@@ -2,10 +2,19 @@ const CHECK_TYPE_REQUEST_URL = "request_url";
 const STATUS_SUCCEEDED = "succeeded";
 const STATUS_FAILED    = "failed";
 
-let timeWindowInSecs = 60*60*24*5;
+let timeWindowInSecs   = 60*60*24*5;
+let pollIntervalInSecs = 10;
 let currentTimestampInSecs;
+let aggregateChecks;
 
 async function main() {
+    update();
+    setInterval(update, pollIntervalInSecs*1000);
+
+    window.addEventListener("resize", () => renderAggregateChecks(aggregateChecks));
+}
+
+async function update() {
     currentTimestampInSecs = Math.ceil(Date.now()/1000);
     const res   = await fetch(
         `/checks?start=${currentTimestampInSecs - timeWindowInSecs}` +
@@ -38,7 +47,8 @@ async function main() {
     }
 
     renderAggregateChecks(aggregates);
-    window.addEventListener("resize", () => renderAggregateChecks(aggregates));
+
+    aggregateChecks = aggregates;
 }
 
 function renderAggregateChecks(aggregates) {
