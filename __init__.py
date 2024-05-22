@@ -5,7 +5,9 @@ import time
 import sys
 from urllib.request import urlopen
 
+COMMAND_RUN_SERVICE           = "run-service"
 COMMAND_RUN_CHECKS            = "run-checks"
+COMMAND_SCHEDULE_CHECKS       = "schedule-checks"
 COMMAND_SERVE_MONITORING_PAGE = "serve"
 STATE_COUNTING_NUMBER_OF_CHECKS = 0
 STATE_RUNNING_CHECKS            = 1
@@ -14,15 +16,17 @@ CHECK_TYPE_REQUEST_URL = "request_url"
 STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED    = "failed"
 
-is_dev               = False
-_command             = ""
-state                = -1
-checks_file_path     = "./checks.jsonl"
-checks_file_handle   = None
-checks_n             = 0
-current_check        = 0
-monitoring_page_ip   = "127.0.0.1"
-monitoring_page_port = 8000
+is_dev                       = False
+_command                     = ""
+state                        = -1
+checks_file_path             = "./checks.jsonl"
+checks_file_handle           = None
+checks_n                     = 0
+current_check                = 0
+monitoring_page_ip           = "127.0.0.1"
+monitoring_page_port         = 8000
+schedule_poll_interval       = 5;
+schedule_run_checks_interval = 30;
 
 
 def dev():
@@ -36,24 +40,54 @@ def command(command_):
 
 
 def run_monitor(func):
-    global state, checks_file_handle
-
-    if _command == COMMAND_RUN_CHECKS:
-        state = STATE_COUNTING_NUMBER_OF_CHECKS
-        func()
-        state = STATE_RUNNING_CHECKS
-        with open(checks_file_path, "a") as checks_file_handle:
-            while current_check < checks_n:
-                timestamp = math.floor(time.time())
-                if checks_file_handle == None: raise Exception
-                checks_file_handle.write('{"timestamp": ' + str(timestamp) + ', "checks": [')
-                func()
-                checks_file_handle.write("]}\n")
+    if _command == COMMAND_RUN_SERVICE:
+        print("Spawning monitoring page server as child process...")
+        is_parent_proc = os.fork()
+        is_child_proc  = not is_parent_proc
+        if is_child_proc:
+            print("Serving monitoring page.")
+            serve_monitoring_page()
+        elif is_parent_proc:
+            print("Running scheduled checks on main process...")
+            schedule_checks(func)
         return
-    if _command == COMMAND_SERVE_MONITORING_PAGE:
+    elif _command == COMMAND_RUN_CHECKS:
+        run_checks(func)
+        return
+    elif _command == COMMAND_SCHEDULE_CHECKS:
+        schedule_checks(func)
+        return
+    elif _command == COMMAND_SERVE_MONITORING_PAGE:
         serve_monitoring_page()
         return
     raise Exception
+
+
+def run_checks(func):
+    global state, checks_file_handle
+
+    state = STATE_COUNTING_NUMBER_OF_CHECKS
+    func()
+    state = STATE_RUNNING_CHECKS
+    with open(checks_file_path, "a") as checks_file_handle:
+        while current_check < checks_n:
+            timestamp = math.floor(time.time())
+            if checks_file_handle == None: raise Exception
+            checks_file_handle.write('{"timestamp": ' + str(timestamp) + ', "checks": [')
+            func()
+            checks_file_handle.write("]}\n")
+
+
+def schedule_checks(func):
+    t0 = time.time()
+    i = 1
+    while True:
+        time.sleep(schedule_poll_interval)
+        if time.time() > t0 + i*schedule_run_checks_interval:
+            print("Running scheduled checks...")
+            run_checks(func)
+            print("Ran checks.")
+            i += 1
 
 
 def next_check():
