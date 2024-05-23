@@ -28,7 +28,7 @@ async function update() {
             let id, y, status;
             switch (check.type) {
                 case CHECK_TYPE_REQUEST_URL:
-                    id = `${check.url} -- Requests`;
+                    id = `${check.url} — Requests`;
                     y  = check.response_time_in_secs;
                     break;
             }
@@ -56,11 +56,26 @@ function renderAggregateChecks(aggregates) {
     checksEl.innerHTML = "";
     for (const [id, aggregate] of Object.entries(aggregates)) {
         const el = document.createElement("div");
-        el.appendChild(document.createTextNode(id));
-        const lastStatus = aggregate.statuses[aggregate.statuses.length - 1];
-        el.appendChild(document.createTextNode(
-            ` -- Last ${lastStatus}`));
-        el.appendChild(document.createElement("br"));
+        {
+            const statusAndDescriptionLineEl = document.createElement("div");
+            statusAndDescriptionLineEl.classList.add("status-and-description-line");
+
+            const lastStatus = aggregate.statuses[aggregate.statuses.length - 1];
+
+            const statusPill = document.createElement("span");
+            statusPill.classList.add("status-pill");
+            if (lastStatus === STATUS_SUCCEEDED) {
+                statusPill.classList.add("status-pill--succeeded");
+            } else {
+                statusPill.classList.add("status-pill--failed");
+            }
+            statusPill.appendChild(document.createTextNode(`Last ${lastStatus}`));
+            statusAndDescriptionLineEl.appendChild(statusPill);
+
+            statusAndDescriptionLineEl.appendChild(document.createTextNode(id));
+            statusAndDescriptionLineEl.appendChild(document.createElement("br"));
+            el.appendChild(statusAndDescriptionLineEl);
+        }
 
         const canvasEl = document.createElement("canvas");
         canvasEl.style.width  = `${checksEl.clientWidth}px`;
