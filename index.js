@@ -6,6 +6,7 @@ let timeWindowInSecs   = 60*60*24*5;
 let pollIntervalInSecs = 10;
 let currentTimestampInSecs;
 let aggregateChecks;
+let canvasStateByChecksAggreateId = new Map();
 
 async function main() {
     update();
@@ -46,6 +47,8 @@ async function update() {
         }
     }
 
+    canvasIdx = 0;
+
     renderAggregateChecks(aggregates);
 
     aggregateChecks = aggregates;
@@ -54,8 +57,10 @@ async function update() {
 function renderAggregateChecks(aggregates) {
     const checksEl = document.getElementById("checks");
     checksEl.innerHTML = "";
+
     for (const [id, aggregate] of Object.entries(aggregates)) {
         const el = document.createElement("div");
+        // Status line and description
         {
             const statusAndDescriptionLineEl = document.createElement("div");
             statusAndDescriptionLineEl.classList.add("status-and-description-line");
@@ -77,34 +82,67 @@ function renderAggregateChecks(aggregates) {
             el.appendChild(statusAndDescriptionLineEl);
         }
 
+        // Timeseries canvas
         const canvasEl = document.createElement("canvas");
         canvasEl.style.width  = `${checksEl.clientWidth}px`;
         canvasEl.style.height = "64px";
+        canvasEl.setAttribute("id", `Canvas for ${id}`);
         el.appendChild(canvasEl);
 
         el.appendChild(document.createElement("br"));
+
+        // Timeseries "scrub" head
+        const srubHeadDatetimeEl = document.createElement("span");
+        srubHeadDatetimeEl.appendChild(document.createTextNode(
+            dateFromTimestamp(currentTimestampInSecs).toLocaleString()
+        ));
+        el.appendChild(srubHeadDatetimeEl);
+
         el.appendChild(document.createElement("br"));
+        el.appendChild(document.createElement("br"));
+
+        // -----------------------------------------------------------
 
         checksEl.appendChild(el);
 
-        renderTimeSeriesCanvas(aggregate, canvasEl);
+        const ctx = canvasEl.getContext("2d");
+        renderTimeSeriesCanvas(aggregate, ctx, canvasEl);
+
+        canvasEl.addEventListener("mousemove", function moveScrubHead(event) {
+            const canvasState = getCanvasState(aggregate.id);
+
+            canvasState.tScrubHead =
+                (event.offsetX/canvasEl.clientWidth)
+                *(canvasState.tMax - canvasState.tMin)
+                + canvasState.tMin;
+            srubHeadDatetimeEl.innerHTML = "";
+
+            srubHeadDatetimeEl.appendChild(document.createTextNode(
+                dateFromTimestamp(canvasState.tScrubHead).toLocaleString()
+            ));
+
+            renderTimeSeriesCanvas(aggregate, ctx, canvasEl);
+        });
     }
 }
 
-function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
-    canvasEl.width = canvasEl.clientWidth;
+function renderTimeSeriesCanvas(aggregate, ctx, canvasEl) {
+    const {id, ts, ys, statuses} = aggregate;
+
+    const canvasState = getCanvasState(id);
+
+    canvasEl.width  = canvasEl.clientWidth;
     canvasEl.height = canvasEl.clientHeight;
 
     let tMin = ts[0];
     let tMax = currentTimestampInSecs;
     const pxPerSec = canvasEl.width/(tMax - tMin);
     const maxY = Math.max(...ys);
-
-    const ctx = canvasEl.getContext("2d");
+    canvasState.tMin = tMin;
+    canvasState.tMax = tMax;
 
     function drawVerticalLine(t, height) {
         const x = (t - tMin)*pxPerSec;
-        console.log(x, height);
 
         ctx.beginPath();
         ctx.moveTo(x, canvasEl.height);
@@ -161,12 +199,18 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
         hour.setHours(hour.getHours() - 1);
     }
 
+    // Draw scrub head rule
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#FFF";
+    ctx.setLineDash([]);
+    drawVerticalLine(canvasState.tScrubHead, canvasEl.height);
+
     // Draw "pins" for timeseries values.
     // Drawn in 2 passes so that the pins for failures are drawn in front of
     // those for successees.
     for (const [status_for_draw_pass, color] of [
         [STATUS_SUCCEEDED, "#F00"],
-        [STATUS_FAILED   , "#0FF"]
+        [STATUS_FAILED   , "#0FF"],
     ]) {
         for (let i = 0; i < ts.length; ++i) {
             const status = statuses[i];
@@ -191,6 +235,27 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
             ctx.fill();
         }
     }
+
+    canvasIdx++;
+}
+
+function getCanvasState(checksAggregateId) {
+    let state = canvasStateByChecksAggreateId.get(checksAggregateId);
+    if (typeof state === "undefined") {
+        state = {
+            tMin: -1,
+            tMax: -1,
+            tScrubHead: currentTimestampInSecs,
+        };
+        canvasStateByChecksAggreateId.set(checksAggregateId, state);
+    }
+    return state;
+}
+
+function dateFromTimestamp(timestamp) {
+    const date = new Date();
+    date.setTime(timestamp*1000);
+    return date;
 }
 
 main();
