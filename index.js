@@ -104,6 +104,7 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
 
     function drawVerticalLine(t, height) {
         const x = (t - tMin)*pxPerSec;
+        console.log(x, height);
 
         ctx.beginPath();
         ctx.moveTo(x, canvasEl.height);
@@ -126,7 +127,7 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
     while (day.getTime()/1000 > tMin) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#000";
-        drawVerticalLine(day.getTime(), canvasEl.height);
+        drawVerticalLine(day.getTime()/1000, canvasEl.height);
         day = new Date(day);
         day.setDate(day.getDate() - 1);
     }
@@ -141,7 +142,7 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
         ctx.strokeStyle = "#000";
         ctx.setLineDash([6, 2]);
         ctx.beginPath();
-        drawVerticalLine(hour.getTime(), canvasEl.height);
+        drawVerticalLine(hour.getTime()/1000, canvasEl.height);
         hour = new Date(hour);
         hour.setHours(hour.getHours() - 6);
     }
@@ -152,11 +153,10 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
     hour.setSeconds(0);
     hour.setMilliseconds(0);
     while (hour.getTime()/1000 > tMin) {
-        const x = (hour.getTime()/1000 - tMin)*pxPerSec;
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#000";
         ctx.setLineDash([2, 7]);
-        drawVerticalLine(hour.getTime(), canvasEl.height);
+        drawVerticalLine(hour.getTime()/1000, canvasEl.height);
         hour = new Date(hour);
         hour.setHours(hour.getHours() - 1);
     }
