@@ -87,6 +87,15 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
 
     const ctx = canvasEl.getContext("2d");
 
+    function drawVerticalLine(t, height) {
+        const x = (t - tMin)*pxPerSec;
+
+        ctx.beginPath();
+        ctx.moveTo(x, canvasEl.height);
+        ctx.lineTo(x, canvasEl.height - height);
+        ctx.stroke();
+    }
+
     // Fill background
     ctx.fillStyle = "#222";
     ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
@@ -100,13 +109,9 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
     day.setSeconds(0);
     day.setMilliseconds(0);
     while (day.getTime()/1000 > tMin) {
-        const x = (day.getTime()/1000 - tMin)*pxPerSec;
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#000";
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvasEl.height);
-        ctx.stroke();
+        drawVerticalLine(day.getTime(), canvasEl.height);
         day = new Date(day);
         day.setDate(day.getDate() - 1);
     }
@@ -117,14 +122,11 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
     hour.setSeconds(0);
     hour.setMilliseconds(0);
     while (hour.getTime()/1000 > tMin) {
-        const x = (hour.getTime()/1000 - tMin)*pxPerSec;
         ctx.lineWidth = 1;
         ctx.strokeStyle = "#000";
         ctx.setLineDash([6, 2]);
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvasEl.height);
-        ctx.stroke();
+        drawVerticalLine(hour.getTime(), canvasEl.height);
         hour = new Date(hour);
         hour.setHours(hour.getHours() - 6);
     }
@@ -139,39 +141,40 @@ function renderTimeSeriesCanvas({ts, ys, statuses}, canvasEl) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#000";
         ctx.setLineDash([2, 7]);
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvasEl.height);
-        ctx.stroke();
+        drawVerticalLine(hour.getTime(), canvasEl.height);
         hour = new Date(hour);
         hour.setHours(hour.getHours() - 1);
     }
 
-    // Draw "pins" for timeseries values
-    for (let i = 0; i < ts.length; ++i) {
-        const t = ts[i];
-        const y = ys[i];
-        const status = statuses[i];
+    // Draw "pins" for timeseries values.
+    // Drawn in 2 passes so that the pins for failures are drawn in front of
+    // those for successees.
+    for (const [status_for_draw_pass, color] of [
+        [STATUS_SUCCEEDED, "#F00"],
+        [STATUS_FAILED   , "#0FF"]
+    ]) {
+        for (let i = 0; i < ts.length; ++i) {
+            const status = statuses[i];
+            if (status != status_for_draw_pass) continue;
 
-        const pinTopRadius = 4;
-        const pinX         = (t - tMin)*pxPerSec;
-        const pinTop       =
-            ((maxY - y)/maxY)*(canvasEl.height - 2*pinTopRadius) + pinTopRadius;
-        const pinBottom    = canvasEl.height;
-        const pinColor     = status === STATUS_FAILED ? "#F00" : "#0FF";
+            const t = ts[i];
+            const y = ys[i];
 
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = pinColor;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(pinX, pinBottom);
-        ctx.lineTo(pinX, pinTop);
-        ctx.stroke();
+            const pinTopRadius = 4;
+            const pinX         = (t - tMin)*pxPerSec;
+            const pinHeight    = (y/maxY)*(canvasEl.height - 2*pinTopRadius) + pinTopRadius;
+            const pinColor     = status === STATUS_FAILED ? "#F00" : "#0FF";
 
-        ctx.fillStyle = pinColor;
-        ctx.beginPath();
-        ctx.arc(pinX, pinTop, pinTopRadius, 0, 360, 0);
-        ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = pinColor;
+            ctx.setLineDash([]);
+            drawVerticalLine(t, pinHeight);
+
+            ctx.fillStyle = pinColor;
+            ctx.beginPath();
+            ctx.arc(pinX, canvasEl.height - pinHeight, pinTopRadius, 0, 360, 0);
+            ctx.fill();
+        }
     }
 }
 
