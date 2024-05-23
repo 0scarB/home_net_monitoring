@@ -15,18 +15,20 @@ STATE_SERVING_MONITORING_PAGE   = 2
 CHECK_TYPE_REQUEST_URL = "request_url"
 STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED    = "failed"
+DEFAULT_EXPECTED_REPONSE_RANGE = (100, 400)
 
-is_dev                       = False
-_command                     = ""
-state                        = -1
-checks_file_path             = "./checks.jsonl"
-checks_file_handle           = None
-checks_n                     = 0
-current_check                = 0
-monitoring_page_ip           = "127.0.0.1"
-monitoring_page_port         = 8000
-schedule_poll_interval       = 60*5;
-schedule_run_checks_interval = 60*30;
+is_dev                          = False
+_command                        = ""
+state                           = -1
+checks_file_path                = "./checks.jsonl"
+checks_file_handle              = None
+checks_n                        = 0
+current_check                   = 0
+monitoring_page_ip              = "127.0.0.1"
+monitoring_page_port            = 8000
+schedule_poll_interval          = 60*5;
+schedule_run_checks_interval    = 60*30;
+expected_response_status_ranges = [DEFAULT_EXPECTED_REPONSE_RANGE]
 
 
 def dev():
@@ -100,7 +102,7 @@ def run_checks(func):
 
 def schedule_checks(func):
     t0 = time.time()
-    i = 1
+    i = 0
     while True:
         time.sleep(schedule_poll_interval)
         if time.time() > t0 + i*schedule_run_checks_interval:
@@ -124,16 +126,37 @@ def next_check():
     raise Exception
 
 
+def expect_response_status(*args):
+    expected_response_status_ranges.clear()
+    for arg in args:
+        arg_type = type(arg)
+        if arg_type is int:
+            status = arg
+            expected_response_status_ranges.append((status, status))
+        elif arg_type is tuple:
+            status_range = arg
+            expected_response_status_ranges.append(status_range)
+        else:
+            raise TypeError
+
+
 def request_url(url):
-    status = STATUS_SUCCEEDED
+    global expected_response_status_ranges
+
+    status = STATUS_FAILED
 
     t0 = time.time()
     response = None
     try:
         response = urlopen(url)
     except:
-        status = STATUS_FAILED
+        pass
     else:
+        for min_status, max_status in expected_response_status_ranges:
+            if min_status <= response.status <= max_status:
+                status = STATUS_SUCCEEDED
+                break;
+
         _ = response.read()
     finally:
         if response is not None:
@@ -150,6 +173,11 @@ def request_url(url):
                                            + str(response_time)     + '}'  )
     if current_check < checks_n:
         checks_file_handle.write(", ")
+
+    # Resetting the response ranges mean that users will have to call
+    # `expected_response_status` more often but prevent users from forgetting
+    # to manually revert back to the defaults
+    expected_response_status_ranges = [DEFAULT_EXPECTED_REPONSE_RANGE];
 
 
 def serve_monitoring_page():
