@@ -1,14 +1,15 @@
+import datetime
 import http.server
 import math
 import os
-import time
 import sys
+import time
 from urllib.request import urlopen
 
 COMMAND_RUN_SERVICE           = "run-service"
 COMMAND_RUN_CHECKS            = "run-checks"
 COMMAND_SCHEDULE_CHECKS       = "schedule-checks"
-COMMAND_SERVE_MONITORING_PAGE = "serve"
+COMMAND_RUN_SERVER            = "run-server"
 STATE_COUNTING_NUMBER_OF_CHECKS = 0
 STATE_RUNNING_CHECKS            = 1
 STATE_SERVING_MONITORING_PAGE   = 2
@@ -17,18 +18,19 @@ STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED    = "failed"
 DEFAULT_EXPECTED_REPONSE_RANGE = (100, 400)
 
-is_dev                          = False
-_command                        = ""
-state                           = -1
-checks_file_path                = "./checks.jsonl"
-checks_file_handle              = None
-checks_n                        = 0
-current_check                   = 0
-monitoring_page_ip              = "127.0.0.1"
-monitoring_page_port            = 8000
-schedule_poll_interval          = 60*5;
-schedule_run_checks_interval    = 60*30;
-expected_response_status_ranges = [DEFAULT_EXPECTED_REPONSE_RANGE]
+is_dev                                           = False
+_command                                         = ""
+state                                            = -1
+checks_file_path                                 = "./checks.jsonl"
+checks_file_handle                               = None
+checks_n                                         = 0
+current_check                                    = 0
+monitoring_page_ip                               = "127.0.0.1"
+monitoring_page_port                             = 8000
+schedule_poll_interval                           = 60*5;
+schedule_run_checks_interval                     = 60*30;
+expected_response_status_ranges                  = [DEFAULT_EXPECTED_REPONSE_RANGE]
+client_id_to_last_notification_request_timestamp = {}
 
 
 def dev():
@@ -63,12 +65,12 @@ def run_checks_interval(interval):
 
 def run_monitor(func):
     if _command == COMMAND_RUN_SERVICE:
-        print("Spawning monitoring page server as child process...")
+        print("Spawning server as child process...")
         is_parent_proc = os.fork()
         is_child_proc  = not is_parent_proc
         if is_child_proc:
-            print("Serving monitoring page.")
-            serve_monitoring_page()
+            print("Running server.")
+            run_server()
         elif is_parent_proc:
             print("Running scheduled checks on main process...")
             schedule_checks(func)
@@ -79,8 +81,8 @@ def run_monitor(func):
     elif _command == COMMAND_SCHEDULE_CHECKS:
         schedule_checks(func)
         return
-    elif _command == COMMAND_SERVE_MONITORING_PAGE:
-        serve_monitoring_page()
+    elif _command == COMMAND_RUN_SERVER:
+        run_server()
         return
     raise Exception
 
@@ -180,7 +182,7 @@ def request_url(url):
     expected_response_status_ranges = [DEFAULT_EXPECTED_REPONSE_RANGE];
 
 
-def serve_monitoring_page():
+def run_server():
     is_first_load = True
 
     class RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -280,7 +282,7 @@ def serve_monitoring_page():
                 # Respond with JSON on success
                 else:
                     timestamp_line_offset = len('{"timestamp": ')
-                    response_content = "["
+                    response_content = "["  # ] <- because Vim
                     with open(checks_file_path) as f:
                         first_item = True
                         for line in f.readlines():
@@ -298,6 +300,66 @@ def serve_monitoring_page():
 
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(response_content)))
+                    self.end_headers()
+                    self.wfile.write(bytes(response_content, "utf-8"))
+            elif self.path.startswith("/client-notification"):
+                expected_route_start = "/client-notification?client-id="
+                if not self.path.startswith(expected_route_start):
+                    response_content = "Invalid /client-notification request!"
+                    self.send_response(400)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(response_content)))
+                    self.end_headers()
+                    self.wfile.write(bytes(response_content, "utf-8"))
+
+                client_id = self.path[len(expected_route_start):]
+                last_notification_request_timestamp = \
+                    client_id_to_last_notification_request_timestamp.get(client_id)
+                if last_notification_request_timestamp is None:
+                    last_notification_request_timestamp = 0
+
+                failure_msgs_since_last_notification_request = []
+                timestamp_line_offset = len('{"timestamp": ')  # } <- because Vim
+                with open(checks_file_path) as f:
+                    for line in f.readlines():
+                        if STATUS_FAILED not in line:
+                            continue
+
+                        i = timestamp_start_i = timestamp_line_offset
+                        while i < len(line) and line[i].isdigit():
+                            i += 1
+                        timestamp = int(line[timestamp_start_i:i])
+
+                        if timestamp < last_notification_request_timestamp:
+                            continue
+
+                        if CHECK_TYPE_REQUEST_URL in line:
+                            url_start_i = line.index('"url": "') + len('"url": "')
+                            url_end_i   = line.index('"', url_start_i)
+                            url = line[url_start_i:url_end_i]
+                            failure_datetime_str = \
+                                    datetime.datetime.fromtimestamp(timestamp)\
+                                    .ctime()
+                            failure_msgs_since_last_notification_request.append(
+                                    'Request to the URL "' + url +
+                                    '" failed at "' + failure_datetime_str + '"')
+
+                client_id_to_last_notification_request_timestamp[client_id] = time.time()
+
+                if failure_msgs_since_last_notification_request:
+                    response_content = "notification\n"
+                    for msg in failure_msgs_since_last_notification_request:
+                        response_content += msg + "\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(response_content)))
+                    self.end_headers()
+                    self.wfile.write(bytes(response_content, "utf-8"))
+                else:
+                    response_content = "no_notification"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
                     self.send_header("Content-Length", str(len(response_content)))
                     self.end_headers()
                     self.wfile.write(bytes(response_content, "utf-8"))
