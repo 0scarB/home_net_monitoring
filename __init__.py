@@ -2,14 +2,16 @@ import datetime
 import http.server
 import math
 import os
+import platform
 import sys
 import time
 from urllib.request import urlopen
 
-COMMAND_RUN_SERVICE           = "run-service"
-COMMAND_RUN_CHECKS            = "run-checks"
-COMMAND_SCHEDULE_CHECKS       = "schedule-checks"
-COMMAND_RUN_SERVER            = "run-server"
+COMMAND_RUN_SERVICE        = "run-service"
+COMMAND_RUN_CHECKS         = "run-checks"
+COMMAND_SCHEDULE_CHECKS    = "schedule-checks"
+COMMAND_RUN_SERVER         = "run-server"
+COMMAND_CHECK_NOTIFICATION = "check-notification"
 STATE_COUNTING_NUMBER_OF_CHECKS = 0
 STATE_RUNNING_CHECKS            = 1
 STATE_SERVING_MONITORING_PAGE   = 2
@@ -17,6 +19,7 @@ CHECK_TYPE_REQUEST_URL = "request_url"
 STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED    = "failed"
 DEFAULT_EXPECTED_REPONSE_RANGE = (100, 400)
+NOTIFICATION_MECHANISM_SH_COMMAND = "sh-command"
 
 is_dev                                           = False
 _command                                         = ""
@@ -25,12 +28,15 @@ checks_file_path                                 = "./checks.jsonl"
 checks_file_handle                               = None
 checks_n                                         = 0
 current_check                                    = 0
-monitoring_page_ip                               = "127.0.0.1"
-monitoring_page_port                             = 8000
+server_ip                                        = "127.0.0.1"
+server_port                                      = 8000
 schedule_poll_interval                           = 60*5;
 schedule_run_checks_interval                     = 60*30;
 expected_response_status_ranges                  = [DEFAULT_EXPECTED_REPONSE_RANGE]
 client_id_to_last_notification_request_timestamp = {}
+_client_id                                       = ""
+_notification_mechanism                          = NOTIFICATION_MECHANISM_SH_COMMAND
+_notification_command_template                   = "echo '<message>'"
 
 
 def dev():
@@ -38,19 +44,14 @@ def dev():
     is_dev = True
 
 
-def command(command_):
-    global _command
-    _command = command_
+def ip(server_ip_):
+    global server_ip
+    server_ip = server_ip_
 
 
-def ip(monitoring_page_ip_):
-    global monitoring_page_ip
-    monitoring_page_ip = monitoring_page_ip_
-
-
-def port(monitoring_page_port_):
-    global monitoring_page_port
-    monitoring_page_port = monitoring_page_port_
+def port(server_port_):
+    global server_port
+    server_port = server_port_
 
 
 def poll_interval(interval):
@@ -63,7 +64,24 @@ def run_checks_interval(interval):
     schedule_run_checks_interval = interval
 
 
-def run_monitor(func):
+def client_id(id):
+    global _client_id
+    _client_id = id
+
+
+def notification_mechanism(mechanism):
+    global _notification_mechanism
+    _notification_mechanism = mechanism
+
+
+def notification_command(command_template):
+    global _notification_command_template
+    _notification_command_template = command_template
+
+
+def run_command(command, handler=None):
+    global _command
+    _command = command
     if _command == COMMAND_RUN_SERVICE:
         print("Spawning server as child process...")
         is_parent_proc = os.fork()
@@ -73,17 +91,44 @@ def run_monitor(func):
             run_server()
         elif is_parent_proc:
             print("Running scheduled checks on main process...")
-            schedule_checks(func)
+            schedule_checks(handler)
         return
     elif _command == COMMAND_RUN_CHECKS:
-        run_checks(func)
+        run_checks(handler)
         return
     elif _command == COMMAND_SCHEDULE_CHECKS:
-        schedule_checks(func)
+        schedule_checks(handler)
         return
     elif _command == COMMAND_RUN_SERVER:
         run_server()
         return
+    elif _command == COMMAND_CHECK_NOTIFICATION:
+        if _notification_mechanism == NOTIFICATION_MECHANISM_SH_COMMAND:
+            global _client_id
+            if _client_id == "":
+                _client_id = str(platform.node())
+            url = "http://" + server_ip + ":" + str(server_port) + \
+                "/client-notification?client-id=" + _client_id
+            response = None
+            message  = None
+            try:
+                response = urlopen(url)
+            except:
+                message = "ERROR: Server unreachable!"
+            else:
+                if response.status != 200:
+                    message = "ERROR: Unexpected server response!"
+                else:
+                    response_body = response.read().decode("utf-8")
+                    if response_body.startswith("notification\n"):
+                        message = response_body[len("notification\n"):]
+            finally:
+                if response is not None:
+                    response.close()
+            if message is None:
+                return
+            cmd = _notification_command_template.replace("<message>", message)
+            os.execvp("/bin/sh", ["/bin/sh", "-c", cmd])
     raise Exception
 
 
@@ -372,7 +417,7 @@ def run_server():
                 self.wfile.write(bytes(response_content, "utf-8"))
 
     server = http.server.HTTPServer(
-            (monitoring_page_ip, monitoring_page_port),
+            (server_ip, server_port),
             RequestHandler)
     server.serve_forever()
 
