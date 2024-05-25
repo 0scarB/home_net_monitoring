@@ -30,11 +30,15 @@ def main():
         port(8000)
         poll_interval(5)
         run_checks_interval(30)
+        remove_old_checks_interval(30)
+        checks_max_age(60*5)
     else:
         ip("XXX.XXX.XXX.XXX")
         port(XXXX)
         poll_interval(60*5)
         run_checks_interval(60*30)
+        remove_old_checks_interval(60*60*12)
+        checks_max_age(60*60*24*5)
 
     notification_mechanism("sh-command")
     notification_sh_command(

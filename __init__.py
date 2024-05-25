@@ -65,6 +65,8 @@ _server_ip                                        = "127.0.0.1"
 _server_port                                      = 8000
 _schedule_poll_interval                           = 60*5;
 _schedule_run_checks_interval                     = 60*30;
+_schedule_remove_old_checks_interval              = 60*60*12
+_checks_max_age                                   = 60*60*24*5
 _expected_response_status_ranges                  = [DEFAULT_EXPECTED_REPONSE_RANGE]
 _client_id_to_last_notification_request_timestamp = {}
 _client_id                                        = ""
@@ -107,7 +109,7 @@ def poll_interval(interval: float) -> None:
 
 
 def run_checks_interval(interval: float) -> None:
-    """Configure the inteval, in seconds, at which checks will be ran.
+    """Configure the interval, in seconds, at which checks will be ran.
 
     Whether checks should be ran is tested every iteration of the
     scheduler loop. This means that `interval` only functions as an
@@ -117,6 +119,27 @@ def run_checks_interval(interval: float) -> None:
     i.e. 30 minutes."""
     global _schedule_run_checks_interval
     _schedule_run_checks_interval = interval
+
+
+def remove_old_checks_interval(interval: float) -> None:
+    """Configure the interval, in seconds, at which the server will
+    check for and remove checks older than the configured max age
+    (see `checks_max_age`).
+
+    If not configured, the interval defaults to 60*60*12,
+    i.e. ~12h."""
+    global _schedule_remove_old_checks_interval
+    _schedule_remove_old_checks_interval = interval
+
+
+def checks_max_age(max_age: float) -> None:
+    """Configure the maximum number of seconds that checks will
+    be stored for.
+
+    If not configured. the interval defaults to 60*60*24*5,
+    i.e. ~5 days."""
+    global _checks_max_age
+    _checks_max_age = max_age
 
 
 def client_id(id: str) -> None:
@@ -129,7 +152,7 @@ def client_id(id: str) -> None:
     _client_id = id
 
 
-def checks_db_file(file_path: str | Path) -> None:
+def checks_db_file(file_path: "str | Path") -> None:
     """Configure the path to the file where check results will be
     stored by the server.
 
@@ -291,14 +314,34 @@ def run_checks(func):
 
 def schedule_checks(func):
     t0 = time.time()
-    i = 0
+    checks_generation  = 0
+    removal_generation = 0
     while True:
         time.sleep(_schedule_poll_interval)
-        if time.time() > t0 + i*_schedule_run_checks_interval:
+
+        t = time.time()
+
+        if t > t0 + checks_generation*_schedule_run_checks_interval:
             print("Running scheduled checks...")
             run_checks(func)
             print("Ran checks.")
-            i += 1
+
+            checks_generation += 1
+
+        if t > t0 + removal_generation*_schedule_remove_old_checks_interval:
+            print("Removing old checks...")
+            min_t = t - _checks_max_age
+            new_content = ""
+            with open(_checks_file_path, "r") as f:
+                for line in f.readlines():
+                    check_t = json.loads(line)["timestamp"]
+                    if check_t > min_t:
+                        new_content += line
+            with open(_checks_file_path, "w") as f:
+                f.write(new_content)
+            print("Removed old checks.")
+
+            removal_generation += 1
 
 
 def next_check() -> bool:
