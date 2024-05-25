@@ -6,21 +6,31 @@ import os
 import platform
 import sys
 import time
+from typing import TYPE_CHECKING, Callable, Literal
 from urllib.request import urlopen
+if TYPE_CHECKING:
+    from pathlib import Path
 
-COMMAND_RUN_SERVICE        = "run-service"
-COMMAND_RUN_CHECKS         = "run-checks"
-COMMAND_SCHEDULE_CHECKS    = "schedule-checks"
-COMMAND_RUN_SERVER         = "run-server"
-COMMAND_CHECK_NOTIFICATION = "check-notification"
-STATE_COUNTING_NUMBER_OF_CHECKS = 0
-STATE_RUNNING_CHECKS            = 1
-STATE_SERVING_MONITORING_PAGE   = 2
-CHECK_TYPE_REQUEST_URL = "request_url"
-STATUS_SUCCEEDED = "succeeded"
-STATUS_FAILED    = "failed"
+Command = Literal[
+        "run-service", "run-checks", "schedule-checks",
+        "run-server", "check-notification"]
+NotificationMechanism = Literal["sh-command"]
+CheckType = Literal["request_url"]
+Status = Literal["succeeded", "failed"]
+
+COMMAND_RUN_SERVICE        : Command = "run-service"
+COMMAND_RUN_CHECKS         : Command = "run-checks"
+COMMAND_SCHEDULE_CHECKS    : Command = "schedule-checks"
+COMMAND_RUN_SERVER         : Command = "run-server"
+COMMAND_CHECK_NOTIFICATION : Command = "check-notification"
+CHECK_TYPE_REQUEST_URL : CheckType = "request_url"
+STATUS_SUCCEEDED : Status = "succeeded"
+STATUS_FAILED    : Status = "failed"
 DEFAULT_EXPECTED_REPONSE_RANGE = (100, 400)
-NOTIFICATION_MECHANISM_SH_COMMAND = "sh-command"
+NOTIFICATION_MECHANISM_SH_COMMAND: NotificationMechanism = "sh-command"
+_STATE_COUNTING_NUMBER_OF_CHECKS = 0
+_STATE_RUNNING_CHECKS            = 1
+_STATE_SERVING_MONITORING_PAGE   = 2
 
 _is_dev                                           = False
 _command                                          = ""
@@ -37,50 +47,159 @@ _expected_response_status_ranges                  = [DEFAULT_EXPECTED_REPONSE_RA
 _client_id_to_last_notification_request_timestamp = {}
 _client_id                                        = ""
 _notification_mechanism                           = NOTIFICATION_MECHANISM_SH_COMMAND
-_notification_command_template                    = "echo '<message>'"
+_notification_sh_command_template                 = "echo '<message>'"
 
 
-def dev():
+def dev() -> None:
+    """Enable developer mode.
+
+    Developer mode if disabled by default."""
     global _is_dev
     _is_dev = True
 
 
-def ip(server_ip):
+def ip(server_ip: str) -> None:
+    """Configure the server's IP address.
+
+    If not configured, the ip defaults to '127.0.0.1'."""
     global _server_ip
     _server_ip = server_ip
 
 
-def port(server_port):
+def port(server_port: int) -> None:
+    """Configure the server's port number.
+
+    If not configured, the port number defaults to '8000'."""
     global _server_port
     _server_port = server_port
 
 
-def poll_interval(interval):
+def poll_interval(interval: float) -> None:
+    """Configure the sleep time in seconds between iterations of the
+    scheduler loop.
+
+    If not configured, the interval defaults to 60*5=300,
+    i.e. 5 minutes."""
     global _schedule_poll_interval
     _schedule_poll_interval = interval
 
 
-def run_checks_interval(interval):
+def run_checks_interval(interval: float) -> None:
+    """Configure the inteval, in seconds, at which checks will be ran.
+
+    Whether checks should be ran is tested every iteration of the
+    scheduler loop. This means that `interval` only functions as an
+    approximate parameter.
+
+    If not configured, the interval defaults to 60*30=1800,
+    i.e. 30 minutes."""
     global _schedule_run_checks_interval
     _schedule_run_checks_interval = interval
 
 
-def client_id(id):
+def client_id(id: str) -> None:
+    """Configure the client ID that will be used for commands such as
+    `check-notification`.
+
+    If not configured, the value of the standard library's
+    `platform.node()` will be used (on demand)."""
     global _client_id
     _client_id = id
 
 
-def notification_mechanism(mechanism):
+def checks_db_file(file_path: str | Path) -> None:
+    """Configure the path to the file where check results will be
+    stored by the server.
+
+    If not configured, the path "./checks.jsonl" will be used.
+
+    Check results are stored as individual JSON objects on each
+    line; consider giving the file path the extension "jsonl"."""
+    global _checks_file_path
+    _checks_file_path = file_path
+
+
+def notification_mechanism(mechanism: NotificationMechanism) -> None:
+    """Configure the notification mechanism used for the
+    `check-notifications` command.
+
+    If not configured, the mechanism defaults to 'sh-command',
+    meaning commands will be run with the Posix shell /bin/sh."""
     global _notification_mechanism
     _notification_mechanism = mechanism
 
 
-def notification_command(command_template):
-    global _notification_command_template
-    _notification_command_template = command_template
+def notification_sh_command(command_template: str) -> None:
+    """Configure the Posix shell command used to display notifications
+    on a client.
+
+    If not configured, the command template "echo '<message>'" will
+    be used.
+
+    Note that the string argument for this function must contain
+    <message> as a placeholder for the notification message!"""
+    global _notification_sh_command_template
+    _notification_sh_command_template = command_template
 
 
-def run_command(command, handler=None):
+def run_command(command: Command, handler: Callable | None = None) -> None:
+    """Start the monitoring server, check for notifications as a client,
+    etc. by running a specific command.
+
+
+    Consider the following script:
+
+        ```
+        check_google_up.py
+
+        import sys
+        from home_net_monitoring import *
+
+        def main():
+            role = sys.argv[1]
+            ip("XXX.XXX.XXX.XXX")
+            port(8000)
+            if role == "server":
+                run_command("run-service", command_handler)
+            if role == "client":
+                run_command("check-notification", command_handler)
+
+        def command_handler():
+            if next_check():
+                request_url("https://google.com")
+
+        main()
+        ```
+
+
+    When we run this script on our server `python3 check_google_up.py server`,
+    the lines
+
+        ```
+        if next_check():
+            request_url("https://google.com")
+        ```
+
+    tell the server to run a "check" at a scheduled interval. Sepcifically,
+    a request is sent to the URL "https://google.com". The result of the
+    check is then recorded by the server. The result's status is set to
+    "succeeded" if the URL responds with a success status code; otherwise
+    the status is set to "failed".
+    An aggregated visualization of these checks is served on a monitoring
+    webpage at the server's port 8000, "http://XXX.XXX.XXX.XXX:8000".
+
+
+    When we run this script on our local machine
+    `python3 check_google_up.py client`, the script will act as a client
+    an make the request
+    "http://XXX.XXX.XXX.XXX:8000/check-notification?client-id=local-hostname".
+    to the server. The server will response with a warning notification
+    message if the check to "https://google.com" failed since the last
+    time the client made this request. If the client receives a warning
+    notification, it will echo it to the standard output
+    (see `notification_sh_command` to change the behaviour from echo
+    to something more useful).
+    """
     global _command
     _command = command
     if _command == COMMAND_RUN_SERVICE:
@@ -128,7 +247,7 @@ def run_command(command, handler=None):
                     response.close()
             if message is None:
                 return
-            cmd = _notification_command_template.replace("<message>", message)
+            cmd = _notification_sh_command_template.replace("<message>", message)
             os.execvp("/bin/sh", ["/bin/sh", "-c", cmd])
     raise Exception
 
@@ -136,9 +255,9 @@ def run_command(command, handler=None):
 def run_checks(func):
     global _state, _checks_file_handle
 
-    _state = STATE_COUNTING_NUMBER_OF_CHECKS
+    _state = _STATE_COUNTING_NUMBER_OF_CHECKS
     func()
-    _state = STATE_RUNNING_CHECKS
+    _state = _STATE_RUNNING_CHECKS
     with open(_checks_file_path, "a") as _checks_file_handle:
         while _current_check < _checks_n:
             timestamp = math.floor(time.time())
@@ -160,21 +279,42 @@ def schedule_checks(func):
             i += 1
 
 
-def next_check():
-    if _state == STATE_COUNTING_NUMBER_OF_CHECKS:
+def next_check() -> bool:
+    """Use this function in if conditions where the condition body
+    declares a single check.
+
+    For example:
+
+        ```
+        if next_check():
+            request_url("https://duckduckgo.com")
+        if next_check():
+            request_url("https://google.com")
+        ```
+
+    declarse to separate checks that check whether the two URLs
+    respond with successful HTTP status codes."""
+    if _state == _STATE_COUNTING_NUMBER_OF_CHECKS:
         global _checks_n
         _checks_n += 1
         return False
-    if _state == STATE_RUNNING_CHECKS:
+    if _state == _STATE_RUNNING_CHECKS:
         global _current_check
         _current_check += 1
         return True
-    if _state == STATE_SERVING_MONITORING_PAGE:
+    if _state == _STATE_SERVING_MONITORING_PAGE:
         return False
     raise Exception
 
 
-def expect_response_status(*args):
+def expect_response_status(*args: int | tuple[int, int]) -> None:
+    """Set the HTTP reponse status code that the next `request_url`
+    call must receive for a check to succeed.
+
+    This function accepts one or more arguments that are either
+    a) an integer for a single HTTP status code or
+    b) a tuple of two integers for an inclusive range of HTTP
+       status codes."""
     _expected_response_status_ranges.clear()
     for arg in args:
         arg_type = type(arg)
@@ -188,7 +328,23 @@ def expect_response_status(*args):
             raise TypeError
 
 
-def request_url(url):
+def request_url(url: str) -> None:
+    """Make a request to the specified URL, setting the current
+    check to "failed", if an unexpected HTTP response status code
+    is received.
+
+    Example:
+
+        ```
+        if next_check():
+            expect_reponse_status(200)
+            # Explicitly set expected response status
+            request_url("https://duckduckgo.com")
+        if next_check():
+            # Response status is implicit
+            request_url("https://google.com")
+        ```
+    """
     global _expected_response_status_ranges
 
     status = STATUS_FAILED
