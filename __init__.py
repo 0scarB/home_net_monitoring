@@ -34,8 +34,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 Command = Literal[
-        "run-service", "run-checks", "schedule-checks",
-        "run-server", "check-notification"]
+    "run-service", "run-checks", "schedule-checks",
+    "run-server", "check-notification"]
 NotificationMechanism = Literal["sh-command"]
 CheckType = Literal["request_url"]
 Status = Literal["succeeded", "failed"]
